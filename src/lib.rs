@@ -72,12 +72,10 @@ impl App {
                 println!("Started well");
                 Ok(())
             }
-            Err(e) => {
-                Err(Box::new(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("Error: {}", e),
-                )))
-            }
+            Err(e) => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!("Error: {}", e),
+            ))),
         }
     }
 }
