@@ -9,7 +9,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
-        architecture: [x86, x64]
+        # architecture: [x86, x64]
         rust: [stable]
     name: Build
     steps:
@@ -21,7 +21,8 @@ jobs:
       run: cargo build --release
     - uses: actions/upload-artifact@v2
       with:
-          name: tcp_router_first-${{ matrix.os }}-${{ matrix.architecture }}
+          name: tcp_router_first-${{ matrix.os }}
+          # name: tcp_router_first-${{ matrix.os }}-${{ matrix.architecture }}
           path: |
             target/release/tcp_router_first
             target/release/tcp_router_first.exe
