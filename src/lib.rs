@@ -1,6 +1,5 @@
 use std::error::Error;
 use std::io::prelude::*;
-use std::io::ErrorKind;
 use std::net::{SocketAddr, TcpStream};
 use std::thread;
 use std::time::Duration;
@@ -27,8 +26,7 @@ impl App {
                 }
             }
             v.clear();
-        }
-        if v.len() > BUFFER_SIZE {
+        } else if v.len() > BUFFER_SIZE {
             v.clear();
         }
     }
@@ -47,13 +45,17 @@ impl App {
                         match read_result {
                             Ok(0) => {
                                 println!("Connection finished.");
+                                break;
                             }
                             Ok(r) => {
                                 println!("Data received: {}", r);
                                 general_buffer.extend_from_slice(&buf[..r]);
                                 App::process_payload(&mut general_buffer);
                             }
-                            Err(e) => eprintln!("Err: {}", e),
+                            Err(e) => {
+                                eprintln!("Err: {}", e);
+                                break;
+                            }
                         }
                     }
                 }
@@ -72,10 +74,7 @@ impl App {
                 println!("Started well");
                 Ok(())
             }
-            Err(e) => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!("Error: {}", e),
-            ))),
+            Err(e) => Err(e),
         }
     }
 }
