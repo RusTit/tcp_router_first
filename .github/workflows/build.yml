@@ -22,5 +22,5 @@ jobs:
       with:
           name: minigrep-${{ matrix.os }}
           path: |
-            target/release/minigrep
-            target/release/minigrep.exe
+            target/release/tcp_router_first
+            target/release/tcp_router_first.exe
