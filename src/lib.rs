@@ -10,8 +10,14 @@ pub struct App {
 
 const BUFFER_SIZE: usize = 1024;
 
+impl Default for App {
+    fn default() -> Self {
+        App::new()
+    }
+}
+
 impl App {
-    pub fn new() -> App {
+    pub fn new() -> Self {
         App {
             connect_thread: None,
         }
