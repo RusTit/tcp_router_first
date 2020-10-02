@@ -1,14 +1,13 @@
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
 use std::thread;
 
 pub struct App {
     connect_thread: Option<thread::JoinHandle<()>>,
     server_thread: Option<thread::JoinHandle<()>>,
     worker_thread: Option<thread::JoinHandle<()>>,
-    tx_event: Option<Arc<Mutex<mpsc::Sender<AppEvent>>>>,
+    tx_event: Option<mpsc::Sender<AppEvent>>,
 }
 
 const BUFFER_SIZE: usize = 1024;
@@ -35,11 +34,9 @@ impl App {
         }
     }
 
-    fn create_tcp_server_thread(
-        tx_clients: Arc<Mutex<std::sync::mpsc::Sender<AppEvent>>>,
-    ) -> std::thread::JoinHandle<()> {
+    fn create_tcp_server_thread(tx: mpsc::Sender<AppEvent>) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
-            let tcp_listner = TcpListener::bind("127.0.0.1:10000");
+            let tcp_listner = TcpListener::bind("127.0.0.1:3000");
             match tcp_listner {
                 Ok(tcp_listner) => {
                     println!("Tcp server is started");
@@ -48,8 +45,7 @@ impl App {
                             Ok(socket) => {
                                 println!("New tcp client connected");
                                 let socket = AppEvent::NewTcpClient(socket);
-                                let tx_clients = tx_clients.lock().unwrap();
-                                tx_clients.send(socket).unwrap();
+                                tx.send(socket).unwrap();
                             }
                             Err(e) => {
                                 eprintln!("Error with tcp client: {}", e);
@@ -64,9 +60,7 @@ impl App {
         })
     }
 
-    fn create_tcp_client_thread(
-        tx_clients: Arc<Mutex<std::sync::mpsc::Sender<AppEvent>>>,
-    ) -> std::thread::JoinHandle<()> {
+    fn create_tcp_client_thread(tx: mpsc::Sender<AppEvent>) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
             let socket = TcpStream::connect("127.0.0.1:8000");
             match socket {
@@ -90,8 +84,7 @@ impl App {
                                         common_buffer.remove(last_index);
                                     }
                                     let ev = AppEvent::DataPacket(common_buffer);
-                                    let tx_data = tx_clients.lock().unwrap();
-                                    tx_data.send(ev).unwrap();
+                                    tx.send(ev).unwrap();
                                     common_buffer = Vec::with_capacity(BUFFER_SIZE);
                                 } else if common_buffer.len() > BUFFER_SIZE {
                                     common_buffer.clear();
@@ -126,7 +119,7 @@ impl App {
                             let write_result = socket.write(&packet[..]);
                             match write_result {
                                 Ok(0) => {
-                                    println!("Socket closed");
+                                    println!("Client disconnected");
                                 }
                                 Ok(w) => {
                                     println!("Data sent to client: {}", w);
@@ -144,18 +137,17 @@ impl App {
 
     pub fn run(&mut self) {
         let (tx_event, rx_event) = mpsc::channel();
-        let tx_event = Arc::new(Mutex::new(tx_event));
-        let tcp_server_thread = App::create_tcp_server_thread(Arc::clone(&tx_event));
+        let tcp_server_thread = App::create_tcp_server_thread(tx_event.clone());
         self.server_thread = Some(tcp_server_thread);
-        let tcp_client_thread = App::create_tcp_client_thread(Arc::clone(&tx_event));
+        let tcp_client_thread = App::create_tcp_client_thread(tx_event.clone());
         self.connect_thread = Some(tcp_client_thread);
         let worker_thread = App::create_worker_thread(rx_event);
         self.worker_thread = Some(worker_thread);
+        self.tx_event = Some(tx_event);
     }
 
     pub fn stop(&mut self) {
-        if let Some(x) = self.tx_event.take() {
-            let tx_event = x.lock().unwrap();
+        if let Some(tx_event) = self.tx_event.take() {
             tx_event.send(AppEvent::Exit).unwrap();
             if let Some(t) = self.worker_thread.take() {
                 t.join().unwrap();
