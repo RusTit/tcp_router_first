@@ -115,27 +115,24 @@ impl App {
                     AppEvent::Exit => break,
                     AppEvent::NewTcpClient(socket) => sockets.push(socket),
                     AppEvent::DataPacket(packet) => {
-                        let mut invalid_sockets: std::vec::Vec<usize> = Vec::new();
-                        sockets.iter_mut().enumerate().for_each(|(i, socket)| {
+                        let mut temp_sockets: std::vec::Vec<TcpStream> =
+                            Vec::with_capacity(sockets.len());
+                        while let Some(mut socket) = sockets.pop() {
                             let write_result = socket.write(&packet[..]);
                             match write_result {
                                 Ok(0) => {
                                     println!("Client disconnected");
-                                    invalid_sockets.push(i);
                                 }
                                 Ok(w) => {
                                     println!("Data sent to client: {}", w);
+                                    temp_sockets.push(socket);
                                 }
                                 Err(e) => {
                                     eprintln!("Write to client error: {}", e);
-                                    invalid_sockets.push(i);
                                 }
                             }
-                        });
-                        invalid_sockets.reverse();
-                        invalid_sockets.iter().for_each(|i| {
-                            sockets.remove(*i);
-                        });
+                        }
+                        sockets = temp_sockets;
                     }
                 }
             }
