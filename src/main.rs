@@ -1,22 +1,14 @@
 use std::io::stdin;
-use std::process;
 use tcp_router_first::App;
 
 fn main() {
     let mut app = App::new();
-    match app.run() {
-        Ok(()) => println!("All good"),
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            process::exit(1);
-        }
-    }
-    let iio = stdin();
-    let mut b_string = String::new();
+    app.run();
+    let console = stdin();
+    let mut input_buffer = String::new();
     loop {
-        println!("Type \"exit\" to stop the app");
-        iio.read_line(&mut b_string).unwrap();
-        if b_string == "exit" {
+        console.read_line(&mut input_buffer).unwrap();
+        if input_buffer.contains("exit") {
             break;
         }
     }
