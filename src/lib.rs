@@ -2,9 +2,9 @@ use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 pub struct App {
-    connect_thread: Option<thread::JoinHandle<()>>,
     server_thread: Option<thread::JoinHandle<()>>,
     worker_thread: Option<thread::JoinHandle<()>>,
     tx_event: Option<mpsc::Sender<AppEvent>>,
@@ -27,7 +27,6 @@ impl Drop for App {
 impl App {
     pub fn new() -> Self {
         App {
-            connect_thread: None,
             server_thread: None,
             worker_thread: None,
             tx_event: None,
@@ -101,12 +100,15 @@ impl App {
                     eprintln!("Socket connect error: {}", e);
                 }
             }
+            tx.send(AppEvent::TcpConnectionLost).unwrap();
         })
     }
 
     fn create_worker_thread(
-        rx_clients: std::sync::mpsc::Receiver<AppEvent>,
+        tx_clients: mpsc::Sender<AppEvent>,
+        rx_clients: mpsc::Receiver<AppEvent>,
     ) -> std::thread::JoinHandle<()> {
+        App::create_tcp_client_thread(tx_clients.clone());
         std::thread::spawn(move || {
             let mut sockets: std::vec::Vec<TcpStream> = Vec::new();
             loop {
@@ -134,6 +136,11 @@ impl App {
                         }
                         sockets = temp_sockets;
                     }
+                    AppEvent::TcpConnectionLost => {
+                        println!("Waiting 5 seconds for new connection.");
+                        thread::sleep(Duration::from_secs(5));
+                        App::create_tcp_client_thread(tx_clients.clone());
+                    }
                 }
             }
         })
@@ -143,9 +150,7 @@ impl App {
         let (tx_event, rx_event) = mpsc::channel();
         let tcp_server_thread = App::create_tcp_server_thread(tx_event.clone());
         self.server_thread = Some(tcp_server_thread);
-        let tcp_client_thread = App::create_tcp_client_thread(tx_event.clone());
-        self.connect_thread = Some(tcp_client_thread);
-        let worker_thread = App::create_worker_thread(rx_event);
+        let worker_thread = App::create_worker_thread(tx_event.clone(), rx_event);
         self.worker_thread = Some(worker_thread);
         self.tx_event = Some(tx_event);
     }
@@ -164,4 +169,5 @@ enum AppEvent {
     NewTcpClient(TcpStream),
     DataPacket(Vec<u8>),
     Exit,
+    TcpConnectionLost,
 }
