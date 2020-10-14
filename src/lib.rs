@@ -33,8 +33,8 @@ impl App {
         }
     }
 
-    fn create_tcp_server_thread(tx: mpsc::Sender<AppEvent>) -> std::thread::JoinHandle<()> {
-        std::thread::spawn(move || {
+    fn create_tcp_server_thread(tx: mpsc::Sender<AppEvent>) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
             let tcp_listner = TcpListener::bind("127.0.0.1:3000");
             match tcp_listner {
                 Ok(tcp_listner) => {
@@ -46,9 +46,7 @@ impl App {
                                 let socket = AppEvent::NewTcpClient(socket);
                                 tx.send(socket).unwrap();
                             }
-                            Err(e) => {
-                                eprintln!("Error with tcp client: {}", e);
-                            }
+                            Err(e) => eprintln!("Error with tcp client: {}", e),
                         }
                     }
                 }
@@ -59,46 +57,51 @@ impl App {
         })
     }
 
-    fn create_tcp_client_thread(tx: mpsc::Sender<AppEvent>) -> std::thread::JoinHandle<()> {
-        std::thread::spawn(move || {
-            let socket = TcpStream::connect("127.0.0.1:8000");
-            match socket {
-                Ok(socket) => {
-                    let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
-                    let mut common_buffer = Vec::with_capacity(BUFFER_SIZE);
-                    loop {
-                        let read_count = (&socket).read(&mut buffer);
-                        match read_count {
-                            Ok(0) => {
-                                println!("Socket closed");
-                                break;
-                            }
-                            Ok(read_count) => {
-                                println!("Received packet: {}", read_count);
-                                common_buffer.extend_from_slice(&buffer[..read_count]);
-                                if common_buffer.contains(&0x0A) || common_buffer.contains(&0x0D) {
-                                    let last_index = common_buffer.len() - 1;
-                                    if common_buffer[last_index] == 0 {
-                                        println!("Remove parasyte byte");
-                                        common_buffer.remove(last_index);
-                                    }
-                                    let ev = AppEvent::DataPacket(common_buffer);
-                                    tx.send(ev).unwrap();
-                                    common_buffer = Vec::with_capacity(BUFFER_SIZE);
-                                } else if common_buffer.len() > BUFFER_SIZE {
-                                    common_buffer.clear();
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Socket read error: {}", e);
-                                break;
-                            }
-                        }
-                    }
+    fn process_common_buffer(mut common_buffer: Vec<u8>, tx: &mpsc::Sender<AppEvent>) -> Vec<u8> {
+        if common_buffer.contains(&0x0A) || common_buffer.contains(&0x0D) {
+            let last_index = common_buffer.len() - 1;
+            if common_buffer[last_index] == 0 {
+                println!("Remove parasyte byte");
+                common_buffer.remove(last_index);
+            }
+            let ev = AppEvent::DataPacket(common_buffer);
+            tx.send(ev).unwrap();
+            common_buffer = Vec::with_capacity(BUFFER_SIZE);
+        } else if common_buffer.len() > BUFFER_SIZE {
+            common_buffer.clear();
+        }
+        common_buffer
+    }
+
+    fn process_client_socket(socket: &mut TcpStream, tx: &mpsc::Sender<AppEvent>) {
+        let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
+        let mut common_buffer = Vec::with_capacity(BUFFER_SIZE);
+        loop {
+            let read_count = socket.read(&mut buffer);
+            match read_count {
+                Ok(0) => {
+                    println!("Socket closed");
+                    break;
+                }
+                Ok(read_count) => {
+                    println!("Received packet: {}", read_count);
+                    common_buffer.extend_from_slice(&buffer[..read_count]);
+                    common_buffer = App::process_common_buffer(common_buffer, &tx);
                 }
                 Err(e) => {
-                    eprintln!("Socket connect error: {}", e);
+                    eprintln!("Socket read error: {}", e);
+                    break;
                 }
+            }
+        }
+    }
+
+    fn create_tcp_client_thread(tx: mpsc::Sender<AppEvent>) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            let socket = TcpStream::connect("127.0.0.1:8000");
+            match socket {
+                Ok(mut socket) => App::process_client_socket(&mut socket, &tx),
+                Err(e) => eprintln!("Socket connect error: {}", e),
             }
             tx.send(AppEvent::TcpConnectionLost).unwrap();
         })
@@ -107,31 +110,26 @@ impl App {
     fn create_worker_thread(
         tx_clients: mpsc::Sender<AppEvent>,
         rx_clients: mpsc::Receiver<AppEvent>,
-    ) -> std::thread::JoinHandle<()> {
+    ) -> thread::JoinHandle<()> {
         App::create_tcp_client_thread(tx_clients.clone());
-        std::thread::spawn(move || {
-            let mut sockets: std::vec::Vec<TcpStream> = Vec::new();
+        thread::spawn(move || {
+            let mut sockets: Vec<TcpStream> = Vec::new();
             loop {
                 let ev = rx_clients.recv().unwrap();
                 match ev {
                     AppEvent::Exit => break,
                     AppEvent::NewTcpClient(socket) => sockets.push(socket),
                     AppEvent::DataPacket(packet) => {
-                        let mut temp_sockets: std::vec::Vec<TcpStream> =
-                            Vec::with_capacity(sockets.len());
+                        let mut temp_sockets: Vec<TcpStream> = Vec::with_capacity(sockets.len());
                         while let Some(mut socket) = sockets.pop() {
                             let write_result = socket.write(&packet[..]);
                             match write_result {
-                                Ok(0) => {
-                                    println!("Client disconnected");
-                                }
+                                Ok(0) => println!("Client disconnected"),
                                 Ok(w) => {
                                     println!("Data sent to client: {}", w);
                                     temp_sockets.push(socket);
                                 }
-                                Err(e) => {
-                                    eprintln!("Write to client error: {}", e);
-                                }
+                                Err(e) => eprintln!("Write to client error: {}", e),
                             }
                         }
                         sockets = temp_sockets;
